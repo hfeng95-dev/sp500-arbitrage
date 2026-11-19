@@ -1,147 +1,103 @@
-# S&P 500 Arbitrage & Reconstitution Engine - Project Handover Document
+# S&P 500 Arbitrage & Reconstitution Engine — Project Handover Document
 
 ## 1. Executive Summary
 
-The **S&P 500 Arbitrage & Reconstitution Engine** is an institutional quantitative research and event-driven trading platform designed to:
-1. **Forecast S&P 500 Additions & Deletions**: Scans the S&P MidCap 400 and eligible large-cap universe to identify the most probable corporate constituents to be added to or removed from the S&P 500 during quarterly reconstitutions.
-2. **Track Milestone Schedules**: Provides automated countdowns for Data Cutoff Dates, Official S&P Dow Jones Indices (S&P DJI) Announcements, and Effective Market-on-Close (MOC) Rebalance Dates.
-3. **Execute Zero Future Data Leakage Backtesting**: Integrates an independent Evaluator Agent that freezes balance sheet fundamentals, market capitalization, float, and liquidity turnover **strictly on the Cutoff Date** before evaluating predictions against official historical outcomes.
-4. **Deliver Realistic Institutional Hit Rates**: Reflects actual S&P Index Committee discretion and sector representation constraints across a **3-year walkback (13 consecutive quarters from Q3 2023 through Q3 2026)**, achieving an Evaluator Rating of **9.0 / 10.0** with **81.6% Top-5 addition recall** and **100% Top-10 addition recall**.
+The **S&P 500 Arbitrage & Reconstitution Engine** is a quantitative research and event-driven arbitrage platform designed to:
+1. **Forecast S&P 500 Additions & Deletions**: Screens eligible S&P MidCap 400 and large-cap non-index stocks against official S&P Dow Jones Indices (S&P DJI) criteria while flagging vulnerable S&P 500 constituents (M&A takeovers or bottom-tier market-cap erosion + GAAP losses).
+2. **Track NYSE Reconstitution Schedules**: Computes exact NYSE business-day cutoff dates, first-Friday announcements (5:15 PM ET), third-Friday MOC effective dates (adjusted for US market holidays such as Juneteenth/Good Friday), a 5-day `POST_EFFECTIVE` cooldown stage, and strictly monotonic `0–100%` cycle progress using `America/New_York` dates.
+3. **Audit Historical Performance Honestly**: Runs a 3-year (13-quarter, `Q3 2023`–`Q3 2026`) point-in-time evaluation enforcing `validate_dataset_integrity()` (zero membership or state-transition contradictions), era-accurate S&P DJI market-cap thresholds, Precision@K & MRR alongside Recall@K, explicit small-pool saturation caveats, and expanding-window walk-forward out-of-sample validation.
 
 ---
 
 ## 2. Directory Structure & Key Modules
 
-The project is located at: `/Users/hfeng/Work/Pythons/sp500 arbitrage`
+The project is located at: `/Users/hfeng/Work/Pythons/sp500_arbitrage`
 
-```
-sp500 arbitrage/
-├── app.py                 # Interactive Streamlit Web Application (Port 8502)
-├── data_loader.py         # Point-in-Time Historical Dataset (13 Quarters) & Active Candidate Universe
-├── sp500_engine.py        # S&P DJI Methodology Scoring Engine (7-Point Criteria & Ranking)
-├── historic_evaluator.py  # Independent Evaluator Agent & 3-Year Walkback Auditor
-├── timeline_manager.py    # Quarterly Reconstitution Calendar & Milestone Engine
-├── run.sh                 # Self-contained executable launch script
-├── HANDOVER.md            # This comprehensive handover document
-├── README.md              # Quickstart guide and repository overview
-└── .gitignore             # Python and cache exclusions
+```text
+sp500_arbitrage/
+├── app.py                 # Interactive Streamlit Web Application (Port 8502+)
+├── data_loader.py         # Point-in-Time Historical Dataset (13 Quarters), Live Pools & Integrity Validator
+├── sp500_engine.py        # S&P DJI Eligibility & Multi-Factor Ranking / Deletion Risk Engine
+├── historic_evaluator.py  # Independent Evaluator, Precision@K/MRR & Expanding-Window Walk-Forward Auditor
+├── timeline_manager.py    # NYSE Holiday-Aware Reconstitution Calendar & Milestone Engine
+├── requirements.txt       # Self-contained dependencies (streamlit, pandas, watchdog)
+├── run.sh                 # POSIX-safe macOS/Linux launcher (local .venv + hash-gated pip sync)
+├── run.bat                # Windows launcher (local .venv + hash-gated pip sync + auto-open)
+├── pytest.ini             # Pytest configuration
+├── tests/                 # Automated unit & integrity test suite
+│   ├── test_timeline.py
+│   ├── test_engine.py
+│   └── test_data_integrity.py
+├── HANDOVER.md            # This handover document
+├── README.md              # Quickstart guide
+└── .gitignore             # Python, venv, cache, and test exclusions
 ```
 
 ### Module Specifications
 
 | Module | Key Functions & Classes | Purpose |
 | :--- | :--- | :--- |
-| [`timeline_manager.py`](file:///Users/hfeng/Work/Pythons/sp500%20arbitrage/timeline_manager.py) | `RebalanceTimelineManager` | Dynamically calculates quarterly rebalance schedules (March, June, September, December). Computes Cutoff Date (last day of preceding month), Announcement Date (1st Friday, 5:15 PM ET), and Effective Date (3rd Friday close). Tracks active cycle countdowns and phase-by-phase tactical playbooks. |
-| [`data_loader.py`](file:///Users/hfeng/Work/Pythons/sp500%20arbitrage/data_loader.py) | `get_point_in_time_data()`, `get_historical_rebalances()`, `get_current_universe()` | Stores frozen point-in-time financial statements (SEC 10-Q filing cutoffs), float caps, and liquidity turnover for all 13 quarters. Contains verified ground-truth additions and removals announced by S&P DJI. |
-| [`sp500_engine.py`](file:///Users/hfeng/Work/Pythons/sp500%20arbitrage/sp500_engine.py) | `SP500RebalanceEngine` | Encapsulates the official S&P DJI 7-point methodology: Minimum market cap threshold ($\ge \$18\text{B}$ in 2025–2026, $\$15.8\text{B}$ in early 2024, $\$14.5\text{B}$ in 2023), 4 consecutive quarters cumulative GAAP net income, latest quarter GAAP positive, 6-month liquidity turnover ratio ($\ge 0.75$), US domicile, voting structure, and S&P MidCap 400 feeder priority. |
-| [`historic_evaluator.py`](file:///Users/hfeng/Work/Pythons/sp500%20arbitrage/historic_evaluator.py) | `HistoricArbitrageEvaluator` | Independent backtesting agent that audits algorithm rankings against official S&P press releases. Enforces the strict time invariant `Cutoff Date < Announcement Date < Effective Date` on every quarter to eliminate lookahead bias. |
-| [`app.py`](file:///Users/hfeng/Work/Pythons/sp500%20arbitrage/app.py) | Streamlit UI | Institutional dark-glassmorphism dashboard with 4 tabs: Addition Candidates, Deletion Candidates, Historic Evaluator Lab, and Arbitrage Playbook. |
+| [`timeline_manager.py`](file:///Users/hfeng/Work/Pythons/sp500_arbitrage/timeline_manager.py) | `RebalanceTimelineManager`, `get_month_end()`, `get_nyse_holidays()`, `count_trading_days()` | Calculates quarterly schedules using `America/New_York` dates, NYSE holiday-aware month-end cutoffs, holiday-adjusted effective dates, true announcement-to-effective trading days, 5-day `POST_EFFECTIVE` cooldown, and strictly monotonic `0–100%` progress. |
+| [`data_loader.py`](file:///Users/hfeng/Work/Pythons/sp500_arbitrage/data_loader.py) | `validate_dataset_integrity()`, `get_point_in_time_data()`, `get_historical_rebalances()`, `get_current_universe()` | Stores 13 quarters of curated point-in-time historical pools (`Q3 2023`–`Q3 2026`) and strictly non-overlapping live Q4 2026 pools with verified `S&P MidCap 400` vs `Non-Index / Large` feeder labels. Enforces zero double-additions, zero double-deletions, and zero stale-pool contamination. |
+| [`sp500_engine.py`](file:///Users/hfeng/Work/Pythons/sp500_arbitrage/sp500_engine.py) | `SP500RebalanceEngine` | Official S&P DJI rules (`$22.7B` default / era lookup `$14.5B–$22.7B`, FMC `>= 50%` threshold, IWF `>= 0.10`, 6m min monthly volume `>= 250k`, 12m IPO seasoning, trailing 4Q GAAP sum `> 0` AND `Q0 > 0`, fail-closed missing core fields), true `math.log` market-cap scaling, unified `35/35/15/15` weights, and calibrated deletion risk scoring (`rank_bottom` + cap ratio + GAAP losses, reaching `HIGH RISK >= 75` up to `95.0`). |
+| [`historic_evaluator.py`](file:///Users/hfeng/Work/Pythons/sp500_arbitrage/historic_evaluator.py) | `HistoricArbitrageEvaluator` | Audits all 13 quarters with era-accurate thresholds, `None`-safe date checks, Recall@3/5/10, Precision@3/5, MRR, dataset integrity integration, transparent small-pool caveats, and expanding-window walk-forward out-of-sample validation. |
+| [`app.py`](file:///Users/hfeng/Work/Pythons/sp500_arbitrage/app.py) | Streamlit UI | Cached (`@st.cache_data`) dark-glassmorphism dashboard with escaped HTML/dollar signs (`&#36;` to prevent KaTeX mangling), dynamic badges, deterministic sorted filters, safe lookups, and `width="stretch"` tables. |
 
 ---
 
-## 3. The S&P Dow Jones Methodology & Scoring Model
+## 3. S&P Dow Jones Methodology & Scoring Model
 
-The algorithm evaluates candidates through a multi-factor weighting scheme:
+### Unified Multi-Factor Weights (`SP500RebalanceEngine.DEFAULT_WEIGHTS`)
+* **Market Capitalization (`35%`)**: True log-scaled score normalized from the era threshold up to `$150B`:
+  `40 + 60 * log(mkt_cap / threshold) / log(150.0 / threshold)` (clamped to `[40, 100]`).
+* **Feeder Preference (`35%`)**: `100` pts for `S&P MidCap 400` members vs `70` pts for `Non-Index / Large`.
+* **Liquidity Turnover (`15%`)**: Annual dollar value traded / float-adjusted market cap (`>= 0.75` mandatory, fail-closed if missing).
+* **Sector Representation (`15%`)**: Sector deficit priority multiplier (`0.80x`–`1.20x`).
 
-$$\text{Score} = w_{\text{cap}} \cdot S_{\text{cap}} + w_{\text{feeder}} \cdot S_{\text{feeder}} + w_{\text{liq}} \cdot S_{\text{liq}} + w_{\text{sector}} \cdot S_{\text{sector}}$$
+### Era-Accurate Unadjusted Market-Cap Thresholds
+* `2023`: `$14.5B`
+* `H1 2024 (Q1–Q2 2024)`: `$15.8B`
+* `H2 2024 (Q3–Q4 2024)`: `$18.0B`
+* `H1 2025 (Q1–Q2 2025)`: `$20.5B`
+* `H2 2025+ (Q3 2025 onward, default)`: `$22.7B`
 
-* **Market Capitalization ($w = 35\%$)**: Log-scaled metric normalized against the point-in-time minimum threshold.
-* **Feeder Preference ($w = 35\%$)**: S&P MidCap 400 constituents receive significant priority ($100 \text{ pts}$ vs $70 \text{ pts}$ for non-index large caps), matching empirical S&P Index Committee historical actions.
-* **Liquidity Turnover ($w = 15\%$)**: Ratio of annual dollar value traded to float-adjusted market cap ($\ge 0.75$ mandatory).
-* **Sector Representation Gap ($w = 15\%$)**: Discretionary adjustment favoring underrepresented sectors to avoid index over-concentration.
-
-### Deletion Vulnerability Logic
-Constituents are flagged for removal based on:
-1. **Pending M&A Takeovers / Mergers (98% Risk)**: Companies with definitive cash/stock merger agreements closing near the rebalance date (e.g., `DFS` acquired by `COF`, `HES` acquired by `CVX`, `JNPR` acquired by `HPE`, `X` acquired by `Nippon Steel`).
-2. **Bottom-Tier Market Capitalization Collapse ($<\$7.5\text{B}$)**: S&P 500 constituents falling into the bottom 3% of the index with sustained consecutive negative GAAP quarters (e.g., `VFC`, `SEDG`, `WHR`, `PARA`, `ETSY`, `AAL`).
-
----
-
-## 4. Zero Future Data Leakage Guarantee
-
-To prevent lookahead bias (a common flaw in quantitative backtesting):
-1. **Timestamp Barrier**: For any historical quarter $Q_t$, the candidate universe and all metrics are strictly frozen on the **Cutoff Date** (the last business day of the month preceding the rebalance month).
-2. **SEC 10-Q Filing Cutoff**: Trailing 4-quarter cumulative GAAP net income only accounts for filings published on or prior to the Cutoff Date.
-   * *Case Study (`UBER`)*: In **Q3 2023** (Cutoff Aug 31, 2023), UBER had a market cap $> \$80\text{B}$ but trailing 4Q GAAP was $-\$374\text{M}$. The model disqualified UBER in Q3 2023. In **Q4 2023** (Cutoff Nov 30, 2023), UBER's Q3 10-Q turned trailing 12-month net income positive ($+\$1.06\text{B}$), and the model promoted it to #1, matching S&P's official inclusion.
-3. **Automated Audit**: Every run of `HistoricArbitrageEvaluator.run_full_historical_audit()` verifies that $\text{Cutoff Date} < \text{Announcement Date} < \text{Effective Date}$ with 0 timestamp violations.
+### Deletion Vulnerability Scoring
+1. **Pending M&A Takeovers (`98.0 CERTAIN`)**: Definitive mergers closing around rebalance dates (e.g., `K` / Kellanova acquired by Mars Inc. in live pool; `CTLT`, `DFS`, `HES`, `MRO`, `JNPR`, `X` historically).
+2. **Organic Vulnerability (up to `95.0`)**: Weighted combination of:
+   - `50%` Cap ratio (`mkt_cap_b / era_threshold`)
+   - `25%` S&P 500 bottom rank (`rank_bottom`)
+   - `25%` Consecutive negative GAAP quarters (`neg_earnings_streak`)
+   Genuine distressed constituents (`< $7.5B`, bottom rank, sustained GAAP losses) properly reach `HIGH RISK (>= 75.0)` up to `95.0`.
 
 ---
 
-## 5. 3-Year Historical Walkback Audit (13 Quarters)
+## 4. Honest Evaluation & Walk-Forward Audit Results (13 Quarters)
 
-Tested against the full competitive candidate field (8–11 eligible contenders competing per quarter):
-
-```text
-====================================================================================================
-           S&P 500 RECONSTITUTION ENGINE: 3-YEAR HISTORIC WALKBACK AUDIT (13 QUARTERS)
-====================================================================================================
-Quarter   Cutoff Date   Announce Date   Top-5 Addition  Top-10 Addition   Deletion   Score   Anti-Leakage
-----------------------------------------------------------------------------------------------------
-Q3 2026   2026-08-31     2026-09-04         33.3%           100.0%         100.0%     6.0/10  🛡️ CLEAN
-Q2 2026   2026-05-29     2026-06-05        100.0%           100.0%         100.0%    10.0/10  🛡️ CLEAN
-Q1 2026   2026-02-27     2026-03-06         50.0%           100.0%         100.0%     7.0/10  🛡️ CLEAN
-Q4 2025   2025-11-28     2025-12-05         75.0%           100.0%         100.0%     8.5/10  🛡️ CLEAN
-Q3 2025   2025-08-29     2025-09-05         66.7%           100.0%         100.0%     8.0/10  🛡️ CLEAN
-Q2 2025   2025-05-30     2025-06-06        100.0%           100.0%         100.0%    10.0/10  🛡️ CLEAN
-Q1 2025   2025-02-28     2025-03-07        100.0%           100.0%         100.0%    10.0/10  🛡️ CLEAN
-Q4 2024   2024-11-29     2024-12-06        100.0%           100.0%         100.0%    10.0/10  🛡️ CLEAN
-Q3 2024   2024-08-30     2024-09-06         66.7%           100.0%         100.0%     8.0/10  🛡️ CLEAN
-Q2 2024   2024-05-31     2024-06-07        100.0%           100.0%         100.0%    10.0/10  🛡️ CLEAN
-Q1 2024   2024-02-29     2024-03-01        100.0%           100.0%         100.0%    10.0/10  🛡️ CLEAN
-Q4 2023   2023-11-30     2023-12-01        100.0%           100.0%         100.0%    10.0/10  🛡️ CLEAN
-Q3 2023   2023-08-31     2023-09-01        100.0%           100.0%         100.0%    10.0/10  🛡️ CLEAN
-----------------------------------------------------------------------------------------------------
-COMPOSITE EVALUATOR RATING: 9.0 / 10.0 (HIGH ACCURACY PASSED >= 8.5 BENCHMARK)
-Average Top-5 Addition Recall:   81.6% (31 of 38 official additions captured in Top-5)
-Average Top-10 Addition Recall: 100.0% (100% of all official additions captured in Top-10)
-Average Deletion Recall:        100.0% (38 of 38 vulnerable deletions captured in Top-5 risk)
-Future Data Leakage Violations: 0 Violations (13 / 13 quarters verified Cutoff < Announce < Effective)
-====================================================================================================
-```
-
-### Special Institutional Considerations
-* **SanDisk (`SNDK`)**: Added to the S&P 500 in November 2025, and subsequently promoted into the **S&P 100 Index on September 18, 2026** (announced September 4, 2026), generating significant passive rebalance volume.
-* **Why 100% Top-5 Recall is Unrealistic**: The S&P Dow Jones Index Committee regularly exercises discretionary delays on high-scoring mega-caps (e.g. `DELL`, `PLTR`, `APO`) to manage sector balances, selecting smaller mid-cap feeders (e.g. `BE`, `ERIE`, `FIX`, `WSM`). The 81.6% Top-5 recall represents authentic institutional performance without survivor-bias leakage.
+Using canonical `DEFAULT_WEIGHTS` (`35/35/15/15`) and era-accurate thresholds across `Q3 2023`–`Q3 2026`:
+* **Dataset Integrity**: `PASSED` (`0` membership/chronology errors across all 13 historical quarters + live pools).
+* **Default Full-Sample Metrics (`35/35/15/15`)**:
+  - Composite Rating: `8.8 / 10`
+  - Additions: `Recall@3 = 57.9%`, `Recall@5 = 78.9%`, `Precision@5 = 46.2%`, `MRR = 0.490`
+  - Deletions: `Recall@3 = 68.4%`, `Recall@5 = 94.7%`, `Precision@5 = 55.4%`, `MRR = 0.559`
+* **Expanding-Window Walk-Forward Out-of-Sample Validation (9 OOS folds, 4-quarter warm-up)**:
+  - OOS Avg Score: `8.8 / 10` | OOS Add `Recall@5 = 84.3%` | OOS Add `Precision@5 = 51.1%` | OOS Add `MRR = 0.441`
+* **Small-Pool Caveat**: Curated PIT pools average `7.7` addition contenders and `5.3` deletion contenders per quarter. Because `pool_size <= 10` for additions (and `<= 5` in 9/13 deletion quarters), `Top-10` addition recall (`100%`) and some `Top-5` deletion recalls are pool-saturated. Always evaluate ranking quality using **Precision@K** and **MRR** alongside Recall@K.
 
 ---
 
-## 6. How to Run & Maintain
+## 5. How to Run & Verify
 
-### 1. Launch the Web Application
+### Launch Web Dashboard
 ```bash
-cd "/Users/hfeng/Work/Pythons/sp500 arbitrage"
+cd /Users/hfeng/Work/Pythons/sp500_arbitrage
 ./run.sh
 ```
-* The application runs locally on **`http://localhost:8502`**.
-* The server uses Streamlit in headless mode with background autoreload.
+On Windows, double-click or execute `run.bat`. Both scripts create/activate local `.venv`, sync `requirements.txt` only when its SHA-256 hash changes, and probe for a free port starting at `8502`.
 
-### 2. Run the Independent Evaluator CLI
-To run the automated 13-quarter audit directly from the command line:
+### Run Automated Verification & CLI Audit
 ```bash
-/Users/hfeng/Work/Pythons/learning/.venv/bin/python "/Users/hfeng/Work/Pythons/sp500 arbitrage/historic_evaluator.py"
-```
-
-### 3. Adding New Quarters
-When a new quarter arrives:
-1. Open [`data_loader.py`](file:///Users/hfeng/Work/Pythons/sp500%20arbitrage/data_loader.py).
-2. Add the new entry in `HISTORICAL_REBALANCES` with `cutoff_date`, `announcement_date`, `effective_date`, `actual_additions`, and `actual_deletions`.
-3. Add the candidate universe frozen as of the cutoff date in `HISTORICAL_POINT_IN_TIME_CANDIDATES`.
-4. Run `historic_evaluator.py` to confirm 0 data leakage and verify the updated composite score.
-
----
-
-## 7. Version Control & Repository Setup
-
-Local Git tracking has been initialized and committed:
-- **Local Branch**: `main`
-- **Initial Commit**: `feat: complete S&P 500 arbitrage and reconstitution engine with 3-year walkback`
-- **Target Remote**: `git@github.com:hfeng95-dev/sp500-arbitrage.git`
-
-To push to a new GitHub repository:
-1. Create a new empty repository named `sp500-arbitrage` under your GitHub account (`hfeng95-dev`).
-2. Run:
-```bash
-cd "/Users/hfeng/Work/Pythons/sp500 arbitrage"
-git remote add origin git@github.com:hfeng95-dev/sp500-arbitrage.git
-git push -u origin main
+cd /Users/hfeng/Work/Pythons/sp500_arbitrage
+.venv/bin/python -m py_compile *.py
+.venv/bin/pytest -v
+.venv/bin/python historic_evaluator.py
 ```

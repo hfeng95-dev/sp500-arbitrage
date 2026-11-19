@@ -3,20 +3,32 @@
 An institutional-grade quantitative forecasting and event-driven arbitrage platform for S&P 500 quarterly reconstitutions.
 
 ## Features
-- **Predictive Ranking Engine**: Implements the official S&P Dow Jones Indices (S&P DJI) 7-point methodology (Market Cap threshold, 4Q cumulative GAAP earnings, liquidity turnover, S&P MidCap 400 feeder preference).
-- **Timeline & Milestone Engine**: Real-time cycle tracker for Data Cutoff Dates, Official S&P Announcements, and Market-on-Close (MOC) Effective Dates.
-- **Zero Future Leakage Evaluator**: 3-year point-in-time historical backtest (13 consecutive quarters from Q3 2023 through Q3 2026) with zero lookahead bias (`Cutoff < Announcement < Effective`).
-- **Interactive Web Dashboard**: Modern dark glassmorphic Streamlit interface on port 8502.
+- **S&P DJI Predictive Ranking Engine (`sp500_engine.py`)**: Implements official S&P Dow Jones Indices criteria:
+  - Era-accurate unadjusted market-cap guidelines (`$14.5B` in 2023, `$15.8B` in H1 2024, `$18.0B` in H2 2024, `$20.5B` in H1 2025, `$22.7B` default from Jul 2025).
+  - Float-Adjusted Market Cap (`FMC >= 50%` of threshold), Investable Weight Factor (`IWF >= 0.10`), 6-month minimum monthly trading volume (`>= 250,000` shares), and 12-month IPO seasoning (`>= 12` months).
+  - Financial viability: trailing 4-quarter sum of GAAP net income `> 0` **AND** most recent quarter (`Q0`) `> 0`, with fail-closed defaults on missing core eligibility fields.
+  - Unified multi-factor weights (`35%` log-scaled market cap / `35%` MidCap 400 feeder / `15%` liquidity / `15%` sector representation) and calibrated deletion risk scoring (`rank_bottom` + cap ratio + GAAP loss streak).
+- **NYSE Calendar & Milestone Engine (`timeline_manager.py`)**: Uses `America/New_York` dates, NYSE holiday-aware month-end cutoffs, 5-day `POST_EFFECTIVE` cooldown window, true trading-day counts (handling Juneteenth/Good Friday), and strictly monotonic `0–100%` cycle progress.
+- **Honest Point-in-Time Evaluator (`historic_evaluator.py`)**: Audits 13 quarters (`Q3 2023` – `Q3 2026`) with `validate_dataset_integrity()` (zero membership contradictions), Precision@K, MRR, Recall@K, transparent small-pool caveats, and expanding-window walk-forward out-of-sample validation.
+- **Interactive Web Dashboard (`app.py`)**: Dark glassmorphic Streamlit dashboard on port `8502` (auto-probing free ports).
 
 ## Quick Start
+
+### macOS / Linux
 ```bash
+cd /Users/hfeng/Work/Pythons/sp500_arbitrage
 ./run.sh
 ```
-Access the application at `http://localhost:8502`.
 
-To run the automated 13-quarter audit CLI:
-```bash
-python historic_evaluator.py
+### Windows
+```bat
+run.bat
 ```
 
-For complete technical documentation, methodology formulas, and case studies, refer to [HANDOVER.md](HANDOVER.md).
+### CLI Evaluator & Test Suite
+```bash
+.venv/bin/python historic_evaluator.py
+.venv/bin/pytest -v
+```
+
+For full methodology, data integrity details, and historical scorecard output, see [HANDOVER.md](HANDOVER.md).
